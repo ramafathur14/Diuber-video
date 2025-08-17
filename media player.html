@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minimal Video Player</title>
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" href="https://via.placeholder.com/512x512.png?text=R" type="image/png">
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #000;
+      overflow-x: hidden;
+      touch-action: pan-y;
+    }
+    
+    .video-feed {
+      height: 100vh;
+      overflow-y: scroll;
+      scroll-snap-type: y mandatory;
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    .video-container {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+      scroll-snap-align: start;
+    }
+    
+    .video-container video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+
+      /* Mencegah popup download/klik kanan lama */
+      pointer-events: auto;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+    
+    .upload-btn {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background-color: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(10px);
+      border: none;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    
+    #fileInput {
+      display: none;
+    }
+    
+    .spinner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 4px solid white;
+      animation: spin 1s linear infinite;
+      display: none;
+    }
+    
+    @keyframes spin {
+      0% { transform: translate(-50%, -50%) rotate(0deg); }
+      100% { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="video-feed" id="videoFeed"></div>
+  
+  <button class="upload-btn" id="uploadBtn">+</button>
+  <input type="file" id="fileInput" accept="video/*" multiple>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const videoFeed = document.getElementById('videoFeed');
+      const uploadBtn = document.getElementById('uploadBtn');
+      const fileInput = document.getElementById('fileInput');
+      
+      let videos = [];
+      let currentVideoIndex = 0;
+      let isScrolling = false;
+      
+      // Event listeners
+      uploadBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', handleFileUpload);
+      
+      // Handle upload video
+      function handleFileUpload(e) {
+        const files = e.target.files;
+        
+        if (files.length > 0) {
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            
+            if (file.type.startsWith('video/')) {
+              const videoObj = {
+                file: file,
+                url: URL.createObjectURL(file)
+              };
+              
+              videos.push(videoObj);
+              addVideoToFeed(videoObj);
+            }
+          }
+          
+          // Play first video if it's the only one
+          if (videos.length === files.length && videos.length === 1) {
+            playVideo(0);
+          }
+        }
+        
+        // Reset input file
+        fileInput.value = '';
+      }
+      
+      // Add video to feed
+      function addVideoToFeed(videoObj) {
+        const videoContainer = document.createElement('div');
+        videoContainer.className = 'video-container';
+        videoContainer.dataset.index = videos.length - 1;
+        
+        videoContainer.innerHTML = `
+          <video playsinline preload="metadata"></video>
+          <div class="spinner"></div>
+        `;
+        
+        videoFeed.appendChild(videoContainer);
+        
+        // Setup video element
+        const videoElement = videoContainer.querySelector('video');
+        const spinner = videoContainer.querySelector('.spinner');
+        videoElement.src = videoObj.url;
+
+        // cegah klik lama popup download
+        videoElement.addEventListener("contextmenu", e => e.preventDefault());
+        videoElement.addEventListener("touchstart", e => {
+          if (e.touches.length > 1) e.preventDefault();
+        }, { passive: false });
+
+        // Video events
+        videoElement.addEventListener('waiting', () => {
+          spinner.style.display = 'block';
+        });
+        
+        videoElement.addEventListener('playing', () => {
+          spinner.style.display = 'none';
+        });
+        
+        videoElement.addEventListener('ended', () => {
+          // Auto play next video
+          const nextIndex = parseInt(videoContainer.dataset.index) + 1;
+          if (nextIndex < videos.length) {
+            scrollToVideo(nextIndex);
+          }
+        });
+        
+        // Click to pause/play
+        videoContainer.addEventListener('click', () => {
+          if (videoElement.paused) {
+            videoElement.play();
+          } else {
+            videoElement.pause();
+          }
+        });
+      }
+      
+      // Play specific video
+      function playVideo(index) {
+        if (index >= 0 && index < videos.length) {
+          currentVideoIndex = index;
+          const containers = document.querySelectorAll('.video-container');
+          const container = containers[index];
+          const video = container.querySelector('video');
+          
+          // Pause all other videos
+          document.querySelectorAll('.video-container video').forEach(v => {
+            if (v !== video) {
+              v.pause();
+              v.currentTime = 0;
+            }
+          });
+          
+          // Play selected video
+          video.play();
+          
+          // Scroll to video
+          scrollToVideo(index);
+        }
+      }
+      
+      // Scroll to video
+      function scrollToVideo(index) {
+        if (isScrolling) return;
+        
+        isScrolling = true;
+        const containers = document.querySelectorAll('.video-container');
+        if (index >= 0 && index < containers.length) {
+          containers[index].scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+          
+          // Play video after scroll
+          setTimeout(() => {
+            const video = containers[index].querySelector('video');
+            if (video.paused) {
+              video.play();
+            }
+            isScrolling = false;
+          }, 500);
+        }
+      }
+      
+      // Handle scroll events for video switching
+      videoFeed.addEventListener('scroll', () => {
+        if (isScrolling) return;
+        
+        const containers = document.querySelectorAll('.video-container');
+        let closestIndex = 0;
+        let closestDistance = Infinity;
+        
+        containers.forEach((container, index) => {
+          const rect = container.getBoundingClientRect();
+          const distance = Math.abs(rect.top);
+          
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestIndex = index;
+          }
+        });
+        
+        if (closestIndex !== currentVideoIndex) {
+          currentVideoIndex = closestIndex;
+          playVideo(closestIndex);
+        }
+      });
+    });
+
+    // PWA service worker
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("service-worker.js");
+      });
+    }
+  </script>
+</body>
+</html>
